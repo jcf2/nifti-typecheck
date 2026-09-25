@@ -124,7 +124,7 @@ class NIfTIHeaderParser:
         """
         try:
             # Determine byte order for parsing
-            unpack_fmt = '>8Q' if big_endian else '<8Q'
+            unpack_fmt = '>8q' if big_endian else '<8q'
             
             # Dimension information
             dim = struct.unpack(unpack_fmt, header_bytes[16:80])
