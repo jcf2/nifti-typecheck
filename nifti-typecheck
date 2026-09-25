@@ -127,7 +127,7 @@ class NIfTIHeaderParser:
             unpack_fmt = '>8Q' if big_endian else '<8Q'
             
             # Dimension information
-            dim = struct.unpack(unpack_fmt, header_bytes[40:104])
+            dim = struct.unpack(unpack_fmt, header_bytes[16:80])
             
             # Intent code
             intent_code_fmt = '>h' if big_endian else '<h'
