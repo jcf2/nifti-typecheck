@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+#
+#Classify a .nii by type (volumetric, cifti, surface, unknown)
+import struct
+import enum
+import os
+import sys
+from pathlib import Path
+
+DEBUG = False
+
+def debug_print(*args, **kwargs):
+    """
+    Works like print() but only when DEBUG is True
+    """
+    if DEBUG:
+        print(*args, **kwargs)
+
+class NIfTIHeaderParser:
+    class ImageType(enum.Enum):
+        VOLUMETRIC = 'volumetric'
+        SURFACE = 'surface'
+        CIFTI = 'cifti'
+        UNKNOWN = 'unknown'
+
+    @classmethod
+    def parse_nifti_header(cls, filepath):
+        """
+        Parse NIfTI header with robust header length detection
+        """
+        try:
+            with open(filepath, 'rb') as f:
+                # Read initial bytes to determine header length
+                header_start = f.read(348)
+                
+                # Check header length
+                # Try both little-endian and big-endian
+                try:
+                    sizeof_hdr_le = struct.unpack('<I', header_start[0:4])[0]
+                    sizeof_hdr_be = struct.unpack('>I', header_start[0:4])[0]
+                except struct.error:
+                    debug_print("Could not read header length")
+                    return cls.ImageType.UNKNOWN, None
+
+                debug_print(f"sizeof_hdr (little-endian): {sizeof_hdr_le}")
+                debug_print(f"sizeof_hdr (big-endian): {sizeof_hdr_be}")
+
+                # Determine header type and read full header
+                if sizeof_hdr_le == 348:  # NIfTI-1
+                    debug_print("Detected NIfTI-1 header (little-endian)")
+                    header_bytes = header_start
+                    header_info = cls._parse_nifti1_header(header_bytes)
+                    image_type = cls._classify_nifti1_image(header_info)
+                
+                elif sizeof_hdr_le == 540:  # NIfTI-2
+                    debug_print("Detected NIfTI-2 header (little-endian)")
+                    header_bytes = header_start + f.read(540 - 348)
+                    header_info = cls._parse_nifti2_header(header_bytes)
+                    image_type = cls._classify_nifti2_image(header_info)
+                
+                elif sizeof_hdr_be == 348:  # NIfTI-1 (big-endian)
+                    debug_print("Detected NIfTI-1 header (big-endian)")
+                    header_bytes = header_start
+                    header_info = cls._parse_nifti1_header(header_bytes, big_endian=True)
+                    image_type = cls._classify_nifti1_image(header_info)
+                
+                elif sizeof_hdr_be == 540:  # NIfTI-2 (big-endian)
+                    debug_print("Detected NIfTI-2 header (big-endian)")
+                    header_bytes = header_start + f.read(540 - 348)
+                    header_info = cls._parse_nifti2_header(header_bytes, big_endian=True)
+                    image_type = cls._classify_nifti2_image(header_info)
+                
+                else:
+                    debug_print(f"Unknown header length: {sizeof_hdr_le}")
+                    return cls.ImageType.UNKNOWN, None
+
+                debug_print(f"Classified image type: {image_type}")
+                return image_type, header_info
+
+        except Exception as e:
+            debug_print(f"Error parsing {filepath}: {e}")
+            return cls.ImageType.UNKNOWN, None
+
+    @classmethod
+    def _parse_nifti1_header(cls, header_bytes, big_endian=False):
+        """
+        Extract key fields from NIfTI-1 header
+        """
+        try:
+            # Determine byte order for parsing
+            unpack_fmt = '>8H' if big_endian else '<8H'
+            
+            # Dimension information
+            dim = struct.unpack(unpack_fmt, header_bytes[40:56])
+            
+            # Intent code
+            intent_code_fmt = '>h' if big_endian else '<h'
+            intent_code = struct.unpack(intent_code_fmt, header_bytes[68:70])[0]
+            
+            # Data type
+            datatype_fmt = '>h' if big_endian else '<h'
+            datatype = struct.unpack(datatype_fmt, header_bytes[70:72])[0]
+            
+            # Magic number
+            magic = header_bytes[344:348].decode('ascii', errors='ignore').strip()
+            
+            return {
+                'version': 1,
+                'dimensions': dim[1:dim[0]+1],
+                'ndim': dim[0],
+                'magic': magic,
+                'datatype': datatype,
+                'intent_code': intent_code,
+                'endian': 'big' if big_endian else 'little'
+            }
+        except struct.error as e:
+            debug_print(f"NIfTI-1 parsing error: {e}")
+            return None
+
+    @classmethod
+    def _parse_nifti2_header(cls, header_bytes, big_endian=False):
+        """
+        Extract key fields from NIfTI-2 header
+        """
+        try:
+            # Determine byte order for parsing
+            unpack_fmt = '>8Q' if big_endian else '<8Q'
+            
+            # Dimension information
+            dim = struct.unpack(unpack_fmt, header_bytes[40:104])
+            
+            # Intent code
+            intent_code_fmt = '>h' if big_endian else '<h'
+            intent_code = struct.unpack(intent_code_fmt, header_bytes[72:74])[0]
+            
+            # Data type
+            datatype_fmt = '>h' if big_endian else '<h'
+            datatype = struct.unpack(datatype_fmt, header_bytes[70:72])[0]
+            
+            return {
+                'version': 2,
+                'dimensions': dim[1:dim[0]+1],
+                'ndim': dim[0],
+                'magic': 'n+2',
+                'datatype': datatype,
+                'intent_code': intent_code,
+                'endian': 'big' if big_endian else 'little'
+            }
+        except struct.error as e:
+            debug_print(f"NIfTI-2 parsing error: {e}")
+            return None
+
+    @classmethod
+    def _classify_nifti1_image(cls, header_info):
+        """
+        Classify NIfTI-1 image type
+        """
+        if not header_info:
+            debug_print("No header info for classification")
+            return cls.ImageType.UNKNOWN
+
+        # Common surface/CIFTI intent codes
+        SURFACE_INTENT_CODES = [1006, 3001]
+        CIFTI_INTENT_CODES = [3001]
+
+        # Check intent code first
+        if header_info['intent_code'] in CIFTI_INTENT_CODES:
+            debug_print("Classified as CIFTI based on intent code")
+            return cls.ImageType.CIFTI
+        elif header_info['intent_code'] in SURFACE_INTENT_CODES:
+            debug_print("Classified as SURFACE based on intent code")
+            return cls.ImageType.SURFACE
+
+        # Dimension-based heuristics
+        if header_info['ndim'] == 3:
+            debug_print("Classified as VOLUMETRIC based on dimensions")
+            return cls.ImageType.VOLUMETRIC
+        elif header_info['ndim'] == 4:
+            debug_print("Classified as SURFACE based on dimensions")
+            return cls.ImageType.SURFACE
+
+        return cls.ImageType.UNKNOWN
+
+    @classmethod
+    def _classify_nifti2_image(cls, header_info):
+        """
+        Classify NIfTI-2 image type
+        """
+        if not header_info:
+            debug_print("No header info for classification")
+            return cls.ImageType.UNKNOWN
+
+        # NIfTI-2 is more likely to be surface/CIFTI
+        debug_print(f"Classifying NIfTI-2 image")
+        debug_print(f"Number of dimensions: {header_info['ndim']}")
+        debug_print(f"Dimensions: {header_info['dimensions']}")
+        
+        # CIFTI-specific intent codes
+        CIFTI_INTENT_CODES = [3001]
+        
+        # Check intent code
+        if header_info['intent_code'] in CIFTI_INTENT_CODES:
+            debug_print("Classified as CIFTI based on intent code")
+            return cls.ImageType.CIFTI
+
+        # Dimension-based heuristics
+        if header_info['ndim'] <= 2 or all(d == 1 for d in header_info['dimensions']):
+            debug_print("Classified as CIFTI based on unusual dimensions")
+            return cls.ImageType.CIFTI
+        
+        debug_print("Classified as SURFACE by default")
+        return cls.ImageType.SURFACE
+
+def main(filepath):
+    # Parse command-line arguments for debugging
+    global DEBUG
+    if len(sys.argv) > 2 and sys.argv[2] == '-d':
+        DEBUG = True
+    
+    real_filepath = Path(filepath).resolve()
+    
+    image_type, header_info = NIfTIHeaderParser.parse_nifti_header(real_filepath)
+    
+    print(f"{image_type.value}")
+    
+    # Optional: print header details in debug mode
+    if DEBUG and header_info:
+        print("Header Details:")
+        for key, value in header_info.items():
+            print(f"  {key}: {value}")
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: nifti-typecheck <nifti_file_path> [-d]")
+        sys.exit(1)
+
+    filepath = sys.argv[1]
+    main(filepath)
