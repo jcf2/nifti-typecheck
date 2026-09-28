@@ -175,7 +175,7 @@ class NIfTIHeaderParser:
             return cls.ImageType.SURFACE
 
         # Dimension-based heuristics
-        if header_info['ndim'] == 3:
+        if header_info['ndim'] in (3, 4):
             debug_print("Classified as VOLUMETRIC based on dimensions")
             return cls.ImageType.VOLUMETRIC
         elif header_info['ndim'] == 4:
