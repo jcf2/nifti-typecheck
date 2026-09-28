@@ -130,18 +130,21 @@ class NIfTIHeaderParser:
             dim = struct.unpack(unpack_fmt, header_bytes[16:80])
             
             # Intent code
-            intent_code_fmt = '>h' if big_endian else '<h'
-            intent_code = struct.unpack(intent_code_fmt, header_bytes[72:74])[0]
+            intent_code_fmt = '>i' if big_endian else '<i'
+            intent_code = struct.unpack(intent_code_fmt, header_bytes[504:508])[0]
             
             # Data type
             datatype_fmt = '>h' if big_endian else '<h'
-            datatype = struct.unpack(datatype_fmt, header_bytes[70:72])[0]
-            
+            datatype = struct.unpack(datatype_fmt, header_bytes[12:14])[0]
+
+            # Magic number
+            magic = header_bytes[4:12].decode('ascii', errors='ignore').strip()
+
             return {
                 'version': 2,
                 'dimensions': dim[1:dim[0]+1],
                 'ndim': dim[0],
-                'magic': 'n+2',
+                'magic': magic,
                 'datatype': datatype,
                 'intent_code': intent_code,
                 'endian': 'big' if big_endian else 'little'
