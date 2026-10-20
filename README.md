@@ -20,18 +20,50 @@ The classification is based on a combination of explicit intent codes and simple
 See the Python source code for the exact rules.
 
 # Command‑line options
- * `nifti-typecheck <nifti_file_path>` – run the program on the supplied file.
- * `nifti-typecheck <nifti_file_path> -d` – run in detail mode. The program will print the full header dictionary (dimensions, intent code, datatype, endian, etc.) in addition to the image type.
+
+usage: nifti-typecheck [-h] [-d] filepath
+
+where filepath is the path to the file to inspect
+
+optional arguments:
+ * `-h`/`--help`: show help message and exit
+ * `-d`/`--detail`: Print detailed information
 
 # Caveats
-It does not work on compressed images (e.g. .nii.gz); this is because an important motivator for it was determining whether uncompressed .nii files should be compressed (volumetric: yes, surface: no).
 
-The tool relies on heuristics when explicit intent codes are absent. Unusual dimension layouts or non‑standard intent codes could lead to mis‑classification. Ideal usage is on a pool of images where the general types included are known in advance.
+It does not work on compressed images (e.g. .nii.gz); this is because
+an important motivator for it was determining whether uncompressed
+.nii files should be compressed (volumetric: yes, surface: no).
 
-Only the most common intent codes are recognized (e.g., 3001 for CIFTI, 1006/3001 for surface). Custom (or future) codes are treated as “unknown”.
+The tool relies on heuristics when explicit intent codes are
+absent. Unusual dimension layouts or non‑standard intent codes could
+lead to mis‑classification. Ideal usage is on a pool of images where
+the general types included are known in advance. When heuristics
+are used, the type classification ends with "?".
+
+Only the most common intent codes are recognized (e.g., 3001 for
+CIFTI, 1006/3001 for surface). Custom (or future) codes are treated as
+“unknown”.
 
 # Sample output
 ```
-$ nifti-typecheck /dartfs/rc/lab/D/DBIC/DBIC/archive/HCP/HCP1200/100307/MNINonLinear/100307.corrThickness.164k_fs_LR.dscalar.nii
-surface
+[~]$ cd /dartfs/rc/lab/D/DBIC/DBIC/archive/HCP/HCP1200/100307
+[100307]$ nifti-typecheck MNINonLinear/100307.corrThickness.164k_fs_LR.dscalar.nii
+cifti
+```
+Or, with `--detail`,
+```
+[100307]$ nifti-typecheck -d MNINonLinear/100307.corrThickness.164k_fs_LR.dscalar.nii
+Classified image type: ImageType.CIFTI
+cifti
+
+Header Details:
+  version: 2
+  dimensions: (1, 1, 1, 1, 1, 298261)
+  ndim: 6
+  magic: n+2
+
+  datatype: 16
+  intent_code: 3006
+  endian: little
 ```
